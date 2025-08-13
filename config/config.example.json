@@ -1,0 +1,54 @@
+{
+  "sourceDirectories": [
+    "./src",
+    "./api", 
+    "./services",
+    "./backend"
+  ],
+  "includeLanguages": [
+    "go",
+    "java",
+    "csharp"
+  ],
+  "excludePatterns": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "target",
+    "bin",
+    "obj",
+    "*.test.*",
+    "*.spec.*",
+    "**/*_test.go",
+    "**/Test*.java",
+    "**/*Test.cs"
+  ],
+  "claude": {
+    "model": "claude-3-5-sonnet-20241022",
+    "maxTokens": 4000,
+    "temperature": 0.1
+  },
+  "confluence": {
+    "spaceKey": "DEV",
+    "parentPageTitle": "API Documentation"
+  },
+  "pipeline": {
+    "batchSize": 5,
+    "delayBetweenBatches": 1000,
+    "maxRetries": 3,
+    "watchMode": false,
+    "dryRun": false
+  },
+  "logging": {
+    "level": "info",
+    "file": "logs/pipeline.log",
+    "maxFiles": 5,
+    "maxSize": "10m"
+  },
+  "git": {
+    "autoInstallHooks": false,
+    "hookTypes": ["pre-commit", "post-commit"],
+    "processOnCommit": true
+  }
+}

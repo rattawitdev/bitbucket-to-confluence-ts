@@ -1,0 +1,255 @@
+stages:
+  - test
+  - build
+  - documentation
+
+variables:
+  NODE_VERSION: "18"
+  DOCKER_DRIVER: overlay2
+
+# Test stage
+test:
+  stage: test
+  image: node:${NODE_VERSION}
+  
+  cache:
+    paths:
+      - node_modules/
+      
+  before_script:
+    - npm ci
+    
+  script:
+    - npm run lint
+    - npm run build
+    - npm test
+    
+  artifacts:
+    reports:
+      junit: junit.xml
+    paths:
+      - dist/
+    expire_in: 1 hour
+    
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Build stage
+build:
+  stage: build
+  image: node:${NODE_VERSION}
+  
+  cache:
+    paths:
+      - node_modules/
+      
+  before_script:
+    - npm ci --only=production
+    
+  script:
+    - npm run build
+    
+  artifacts:
+    paths:
+      - dist/
+      - node_modules/
+    expire_in: 1 hour
+    
+  only:
+    - main
+    - develop
+
+# Documentation update (for merge requests - dry run)
+documentation:dry-run:
+  stage: documentation
+  image: node:${NODE_VERSION}
+  
+  dependencies:
+    - build
+    
+  before_script:
+    - echo "Running documentation pipeline in dry-run mode"
+    
+  script:
+    - export DRY_RUN=true
+    - export LOG_LEVEL=info
+    - node dist/cli.js --changed-only --log-level info
+    
+  artifacts:
+    paths:
+      - logs/
+      - "*.log"
+    expire_in: 1 day
+    when: always
+    
+  only:
+    - merge_requests
+    
+  except:
+    variables:
+      - $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^(feature|hotfix)\/.*$/
+
+# Documentation update (for main/develop branches)
+documentation:update:
+  stage: documentation
+  image: node:${NODE_VERSION}
+  
+  dependencies:
+    - build
+    
+  variables:
+    LOG_LEVEL: info
+    
+  before_script:
+    - echo "Running documentation pipeline for $CI_COMMIT_REF_NAME"
+    
+  script:
+    # Process changed files for regular commits
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ] || [ "$CI_COMMIT_REF_NAME" = "develop" ]; then
+        echo "Processing changed files in $CI_COMMIT_REF_NAME branch"
+        node dist/cli.js --changed-only --log-level info
+      else
+        echo "Skipping documentation update for branch $CI_COMMIT_REF_NAME"
+      fi
+        
+  after_script:
+    # Generate architecture overview for main branch
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ] && [ "$CI_PIPELINE_SOURCE" != "merge_request_event" ]; then
+        echo "Generating architecture overview"
+        node dist/cli.js --generate-overview --log-level info || echo "Architecture overview generation failed"
+      fi
+      
+  artifacts:
+    paths:
+      - logs/
+      - "*.log"
+      - confluence-mapping.json
+    expire_in: 7 days
+    when: always
+    
+  only:
+    - main
+    - develop
+    
+  except:
+    - schedules
+
+# Scheduled full documentation update
+documentation:scheduled:
+  stage: documentation
+  image: node:${NODE_VERSION}
+  
+  dependencies:
+    - build
+    
+  variables:
+    LOG_LEVEL: info
+    
+  before_script:
+    - echo "Running scheduled full documentation update"
+    
+  script:
+    # Full documentation update with force flag
+    - node dist/cli.js --process-all --force --log-level info
+    # Update architecture overview
+    - node dist/cli.js --generate-overview --log-level info
+    
+  artifacts:
+    paths:
+      - logs/
+      - "*.log"
+      - confluence-mapping.json
+    expire_in: 30 days
+    when: always
+    
+  only:
+    - schedules
+    - web
+
+# Manual documentation update job
+documentation:manual:
+  stage: documentation
+  image: node:${NODE_VERSION}
+  
+  dependencies:
+    - build
+    
+  variables:
+    LOG_LEVEL: debug
+    
+  before_script:
+    - echo "Running manual documentation update"
+    - echo "Options available via variables:"
+    - echo "  PROCESS_ALL - set to 'true' to process all files"
+    - echo "  GENERATE_OVERVIEW - set to 'true' to generate architecture overview"
+    - echo "  DRY_RUN - set to 'true' for dry run mode"
+    - echo "  FORCE_UPDATE - set to 'true' to force update all files"
+    
+  script:
+    - |
+      # Determine which action to take based on variables
+      if [ "${PROCESS_ALL}" = "true" ]; then
+        if [ "${FORCE_UPDATE}" = "true" ]; then
+          echo "Processing all files with force update"
+          node dist/cli.js --process-all --force --log-level debug
+        else
+          echo "Processing all files"
+          node dist/cli.js --process-all --log-level debug
+        fi
+      elif [ "${GENERATE_OVERVIEW}" = "true" ]; then
+        echo "Generating architecture overview only"
+        node dist/cli.js --generate-overview --log-level debug
+      else
+        echo "Processing changed files only"
+        node dist/cli.js --changed-only --log-level debug
+      fi
+      
+  artifacts:
+    paths:
+      - logs/
+      - "*.log"
+      - confluence-mapping.json
+    expire_in: 7 days
+    when: always
+    
+  when: manual
+  
+  only:
+    - main
+    - develop
+
+# Include additional GitLab CI templates if needed
+# include:
+#   - template: Security/SAST.gitlab-ci.yml
+#   - template: Security/Dependency-Scanning.gitlab-ci.yml
+
+# Cache configuration
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - node_modules/
+  policy: pull-push
+
+# Define custom rules for when jobs should run
+.changes_in_code: &changes_in_code
+  changes:
+    - "src/**/*"
+    - "api/**/*"
+    - "services/**/*"
+    - "backend/**/*"
+    - "**/*.go"
+    - "**/*.java"
+    - "**/*.cs"
+
+# Override rules for documentation jobs to only run when code changes
+documentation:update:
+  <<: *changes_in_code
+
+documentation:dry-run:
+  <<: *changes_in_code

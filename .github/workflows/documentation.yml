@@ -1,0 +1,317 @@
+name: Update Documentation
+
+on:
+  push:
+    branches: 
+      - main
+      - master
+      - develop
+    paths:
+      - 'src/**'
+      - 'api/**'
+      - 'services/**'
+      - 'backend/**'
+      - '**/*.go'
+      - '**/*.java'
+      - '**/*.cs'
+  
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'src/**'
+      - 'api/**'
+      - 'services/**'
+      - 'backend/**'
+      - '**/*.go'
+      - '**/*.java'
+      - '**/*.cs'
+  
+  workflow_dispatch:
+    inputs:
+      process_all:
+        description: 'Process all files (not just changed)'
+        type: boolean
+        default: false
+      generate_overview:
+        description: 'Generate architecture overview'
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Run without making changes to Confluence'
+        type: boolean
+        default: false
+      repository_url:
+        description: 'Repository URL to process (optional)'
+        type: string
+        default: ''
+      repository_branch:
+        description: 'Specific branch to process (optional)'
+        type: string
+        default: ''
+      repository_token:
+        description: 'Use repository token from secrets'
+        type: boolean
+        default: false
+
+jobs:
+  update-documentation:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2  # Need previous commit for change detection
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci --only=production
+      
+    - name: Build project
+      run: npm run build
+      
+    - name: Validate configuration
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+      run: |
+        if [ -z "$CLAUDE_API_KEY" ]; then
+          echo "Error: CLAUDE_API_KEY secret is not set"
+          exit 1
+        fi
+        if [ -z "$CONFLUENCE_BASE_URL" ]; then
+          echo "Error: CONFLUENCE_BASE_URL secret is not set"
+          exit 1
+        fi
+        if [ -z "$CONFLUENCE_USERNAME" ]; then
+          echo "Error: CONFLUENCE_USERNAME secret is not set"
+          exit 1
+        fi
+        if [ -z "$CONFLUENCE_API_TOKEN" ]; then
+          echo "Error: CONFLUENCE_API_TOKEN secret is not set"
+          exit 1
+        fi
+        if [ -z "$CONFLUENCE_SPACE_KEY" ]; then
+          echo "Error: CONFLUENCE_SPACE_KEY secret is not set"
+          exit 1
+        fi
+        echo "All required secrets are configured"
+        
+    - name: Update documentation (PR - dry run)
+      if: github.event_name == 'pull_request'
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        DRY_RUN: true
+        LOG_LEVEL: info
+      run: |
+        echo "Running documentation pipeline in dry-run mode for PR"
+        npx doc-pipeline --changed-only --log-level info
+        
+    - name: Update documentation (Push - changed files only)
+      if: github.event_name == 'push' && !inputs.process_all
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        DRY_RUN: ${{ inputs.dry_run || false }}
+        LOG_LEVEL: info
+      run: |
+        echo "Processing changed files from push to ${{ github.ref_name }}"
+        npx doc-pipeline --changed-only --log-level info
+        
+    - name: Update documentation (Manual - process all)
+      if: github.event_name == 'workflow_dispatch' && inputs.process_all
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        DRY_RUN: ${{ inputs.dry_run || false }}
+        LOG_LEVEL: info
+      run: |
+        echo "Processing all files (manual trigger)"
+        npx doc-pipeline --process-all --log-level info
+        
+    - name: Generate architecture overview
+      if: github.event_name == 'workflow_dispatch' && inputs.generate_overview && !inputs.repository_url
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        DRY_RUN: ${{ inputs.dry_run || false }}
+        LOG_LEVEL: info
+      run: |
+        echo "Generating architecture overview"
+        npx doc-pipeline --generate-overview --log-level info
+        
+    - name: Process repository URL
+      if: github.event_name == 'workflow_dispatch' && inputs.repository_url
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        DRY_RUN: ${{ inputs.dry_run || false }}
+        LOG_LEVEL: info
+        GITHUB_TOKEN: ${{ inputs.repository_token && secrets.GITHUB_TOKEN || '' }}
+        GITLAB_TOKEN: ${{ inputs.repository_token && secrets.GITLAB_TOKEN || '' }}
+        BITBUCKET_TOKEN: ${{ inputs.repository_token && secrets.BITBUCKET_TOKEN || '' }}
+      run: |
+        echo "Processing repository: ${{ inputs.repository_url }}"
+        
+        # Build command based on inputs
+        CMD="npx doc-pipeline --repository ${{ inputs.repository_url }}"
+        
+        # Add branch if specified
+        if [ "${{ inputs.repository_branch }}" != "" ]; then
+          CMD="$CMD --branch ${{ inputs.repository_branch }}"
+        fi
+        
+        # Add token based on repository provider
+        if [ "${{ inputs.repository_token }}" == "true" ]; then
+          if [[ "${{ inputs.repository_url }}" == *"github.com"* ]]; then
+            CMD="$CMD --token $GITHUB_TOKEN"
+          elif [[ "${{ inputs.repository_url }}" == *"gitlab.com"* ]]; then
+            CMD="$CMD --token $GITLAB_TOKEN"
+          elif [[ "${{ inputs.repository_url }}" == *"bitbucket.org"* ]]; then
+            CMD="$CMD --token $BITBUCKET_TOKEN"
+          fi
+        fi
+        
+        # Add action based on inputs
+        if [ "${{ inputs.process_all }}" == "true" ]; then
+          CMD="$CMD --process-all"
+        elif [ "${{ inputs.generate_overview }}" == "true" ]; then
+          CMD="$CMD --generate-overview"
+        else
+          CMD="$CMD --process-all"  # default action
+        fi
+        
+        CMD="$CMD --log-level info"
+        
+        echo "Executing: $CMD"
+        eval $CMD
+        
+    - name: Upload pipeline logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pipeline-logs-${{ github.run_id }}
+        path: |
+          logs/
+          *.log
+          confluence-mapping.json
+        retention-days: 7
+        
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          let comment = '## 📚 Documentation Pipeline Results\n\n';
+          
+          // Check if logs exist and add summary
+          try {
+            if (fs.existsSync('logs/combined.log')) {
+              const logs = fs.readFileSync('logs/combined.log', 'utf8');
+              const lines = logs.split('\n');
+              const errors = lines.filter(line => line.includes('ERROR')).length;
+              const warnings = lines.filter(line => line.includes('WARN')).length;
+              
+              if (errors === 0 && warnings === 0) {
+                comment += '✅ **Status**: Pipeline completed successfully in dry-run mode\n\n';
+              } else {
+                comment += `⚠️ **Status**: Pipeline completed with ${errors} errors and ${warnings} warnings\n\n`;
+              }
+            } else {
+              comment += '✅ **Status**: Pipeline completed successfully\n\n';
+            }
+          } catch (error) {
+            comment += '⚠️ **Status**: Unable to read pipeline logs\n\n';
+          }
+          
+          comment += '**Note**: This was a dry-run for the pull request. No changes were made to Confluence.\n';
+          comment += 'The documentation will be updated automatically when this PR is merged.\n\n';
+          comment += `**Branch**: ${context.payload.pull_request.head.ref}\n`;
+          comment += `**Commit**: ${context.payload.pull_request.head.sha.substring(0, 7)}\n`;
+          
+          // Post comment
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+
+  # Separate job for scheduled full documentation updates
+  scheduled-update:
+    runs-on: ubuntu-latest
+    if: github.event.schedule
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci --only=production
+      
+    - name: Build project
+      run: npm run build
+      
+    - name: Full documentation update
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        LOG_LEVEL: info
+      run: |
+        echo "Running scheduled full documentation update"
+        npx doc-pipeline --process-all --force --log-level info
+        
+    - name: Generate architecture overview
+      env:
+        CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+        CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+        CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
+        CONFLUENCE_SPACE_KEY: ${{ secrets.CONFLUENCE_SPACE_KEY }}
+        LOG_LEVEL: info
+      run: |
+        echo "Updating architecture overview"
+        npx doc-pipeline --generate-overview --log-level info
+
+# Optional: Schedule weekly full updates
+# schedule:
+#   - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
