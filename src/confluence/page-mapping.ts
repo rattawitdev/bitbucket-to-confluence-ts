@@ -23,18 +23,22 @@ export class PageMappingService {
 
   constructor(mappingFile: string = 'confluence-mapping.json') {
     this.mappingFile = mappingFile;
-    this.loadMappings();
+    // Load mapping data synchronously during construction to avoid race
+    // conditions where mappings are accessed before the async loader
+    // finishes. Using the async version here could result in empty
+    // mappings being used elsewhere in the pipeline.
+    this.loadMappingsSync();
   }
 
-  public async loadMappings(): Promise<void> {
+  private loadMappingsSync(): void {
     try {
-      if (await fs.pathExists(this.mappingFile)) {
-        const data = await fs.readJson(this.mappingFile) as PageMappingData;
-        
+      if (fs.pathExistsSync(this.mappingFile)) {
+        const data = fs.readJsonSync(this.mappingFile) as PageMappingData;
+
         for (const mapping of data.mappings) {
           this.mappings.set(mapping.filePath, mapping);
         }
-        
+
         logger.info(`Loaded ${data.mappings.length} page mappings from ${this.mappingFile}`);
       } else {
         logger.info(`No existing mapping file found at ${this.mappingFile}, starting fresh`);
@@ -43,6 +47,11 @@ export class PageMappingService {
       logger.error(`Error loading page mappings from ${this.mappingFile}:`, error);
       // Continue with empty mappings rather than failing
     }
+  }
+
+  // Retain an async wrapper for compatibility (e.g. restore())
+  public async loadMappings(): Promise<void> {
+    this.loadMappingsSync();
   }
 
   public async saveMappings(): Promise<void> {
